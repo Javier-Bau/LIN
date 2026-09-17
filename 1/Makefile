@@ -1,8 +1,6 @@
 obj-m += modlist.c
 
 all:
-	make -C /lib/modules//build M= modules
-
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
 clean:
-	make -C /lib/modules//build M= clean
-
+	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
