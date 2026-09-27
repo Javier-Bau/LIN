@@ -23,6 +23,7 @@ static ssize_t myproc_write(struct file *filp, const char __user *buf, size_t le
     int num;                  // Entero deonde guardaremos el número a procesar
     size_t copy_len;          // Para controlar la copia de datos de buf a kbuf
     struct list_item *new_item;
+    struct list_item *cursor, *temporal; //variables neceserarias para iterar en la lista y asi hacer remove
 
     if (len > sizeof(kbuf) - 1) {
       copy_len = sizeof(kbuf) - 1;
@@ -51,11 +52,26 @@ static ssize_t myproc_write(struct file *filp, const char __user *buf, size_t le
     }
     else if(sscanf(kbuf, "remove %i", &num) == 1){ 
       printk(KERN_INFO "[MODLIST] Removing number: %i\n", num);
-      // TODO
+      /*
+      uso esta funcion de list.h para iterar sobre una lista (list) de forma segura 
+      frente la eliminicion de un elemento de la lista(es lo que pone en el buscador de las fuenetes del kernel)
+      */
+      list_for_each_entry_safe(cursor, temporal, &mylist, links){ 
+        if(cursor->data == num){
+          list_del(&cursor->links);
+          kfree(cursor);
+        }
+      }
+      printk(KERN_INFO "[MODLIST] Todas las instancias de %i han sido borradas\n", num);
     }
     else if(strncmp(kbuf, "cleanup", 7)==0){
       printk(KERN_INFO "[MODLIST] Cleaning up...\n"); 
-      // TODO
+      // hago lo mismo que en remove pero para toda la lista
+      list_for_each_entry_safe(cursor, temporal, &mylist, links){ 
+        list_del(&cursor->links);
+        kfree(cursor);
+      }
+      printk(KERN_INFO "[MODLIST] Se ha limpiado la lista de manera exitosa\n");
     }
 
     return len;
@@ -99,13 +115,27 @@ int modulo_modlist_init(void)
 	printk(KERN_INFO "Modulo MODLIST cargado\n");
   INIT_LIST_HEAD(&mylist);
 	proc_entry = proc_create("modlist", 0666, NULL, &pops);
-  // TODO falta liberar la memoria al quitar el modulo
+  // comprobamos si falla al crear proc por si acaso
+  if(proc_entry == NULL){
+    printk(KERN_ERR "[MODLIST]Error al crear /proc/modlist\n");
+    return -ENOMEM;
+  }
 	return 0;
 }
 
 void modulo_modlist_clean(void)
 {
+
+  //libero la lista de la misma manera que cuando hago cleanup en el write para cuando cierro el modulo
+  struct list_item *cursor, *temporal; 
+
   remove_proc_entry("modlist", NULL);
+
+  list_for_each_entry_safe(cursor, temporal, &mylist, links){ 
+    list_del(&cursor->links);
+    kfree(cursor);
+  }
+
 	printk(KERN_INFO "Modulo MODLIST descargado.\n");
 }
 
