@@ -16,14 +16,34 @@ struct list_item {
 
 static struct proc_dir_entry *proc_entry;
 
+void cleanup(struct list_head* head){
+    struct list_item *cursor, *temporal; // Variables neceserarias para iterar en la lista y asi hacer remove
+
+    // Hago lo mismo que en remove pero para toda la lista
+    list_for_each_entry_safe(cursor, temporal, head, links){ 
+        list_del(&cursor->links);
+        kfree(cursor);
+    }
+}
+
+void delete_if_equal(struct list_head* head, int num){
+    struct list_item *cursor, *temporal; // Variables neceserarias para iterar en la lista y asi hacer remove
+
+    list_for_each_entry_safe(cursor, temporal, head, links){ 
+        if(cursor->data == num){
+            list_del(&cursor->links);
+            kfree(cursor);
+        }
+    }
+}
 
 
+// TODO estamos accediendo a una variable global desde un contexto que puede ser interrumpido, deberíamos usar mutex o algo así
 static ssize_t myproc_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
     char kbuf[BUFFER_LENGTH]; // Buffer en kernel space
     int num;                  // Entero deonde guardaremos el número a procesar
     size_t copy_len;          // Para controlar la copia de datos de buf a kbuf
     struct list_item *new_item;
-    struct list_item *cursor, *temporal; //variables neceserarias para iterar en la lista y asi hacer remove
 
     if (len > sizeof(kbuf) - 1) {
       copy_len = sizeof(kbuf) - 1;
@@ -52,25 +72,12 @@ static ssize_t myproc_write(struct file *filp, const char __user *buf, size_t le
     }
     else if(sscanf(kbuf, "remove %i", &num) == 1){ 
       printk(KERN_INFO "[MODLIST] Removing number: %i\n", num);
-      /*
-      uso esta funcion de list.h para iterar sobre una lista (list) de forma segura 
-      frente la eliminicion de un elemento de la lista(es lo que pone en el buscador de las fuenetes del kernel)
-      */
-      list_for_each_entry_safe(cursor, temporal, &mylist, links){ 
-        if(cursor->data == num){
-          list_del(&cursor->links);
-          kfree(cursor);
-        }
-      }
+      delete_if_equal(&mylist, num);
       printk(KERN_INFO "[MODLIST] Todas las instancias de %i han sido borradas\n", num);
     }
     else if(strncmp(kbuf, "cleanup", 7)==0){
       printk(KERN_INFO "[MODLIST] Cleaning up...\n"); 
-      // hago lo mismo que en remove pero para toda la lista
-      list_for_each_entry_safe(cursor, temporal, &mylist, links){ 
-        list_del(&cursor->links);
-        kfree(cursor);
-      }
+      cleanup(&mylist);
       printk(KERN_INFO "[MODLIST] Se ha limpiado la lista de manera exitosa\n");
     }
 
@@ -80,28 +87,57 @@ static ssize_t myproc_write(struct file *filp, const char __user *buf, size_t le
 
 static ssize_t myproc_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
   char kbuf[BUFFER_LENGTH];
-  struct list_item* item=NULL;
-  struct list_head* cur_node=NULL;
-  int bytes_escritos = 0;
-  
-  // TODO what happends if the size of the list is greater than the buffer size.
+  struct list_item* item = NULL;
+  struct list_head* cur_node = NULL;
+  char temp[32];
 
-  if(*off > 0){
-    return 0;
-  }
+  int bytes_escritos = 0;        // Variable que lleva el conteo de bytes que se han escrito en kbuf antes de vaciarlo a buf.
+  int bytes_escritos_total = 0;  // Variable que lleva el conteo de los bytes totales que se han volcado a buf.
+  int pos = 0;                   // Para desde donde volcar los datos en buf
+  int pos_off = 0;
+
+  int res_snprintf, bytes_utiles, off_temp;
 
   printk(KERN_INFO "[MODLIST] Mostrando elementos...\n");
   
   list_for_each(cur_node, &mylist) {
       item = list_entry(cur_node, struct list_item, links);
-      bytes_escritos += snprintf(kbuf+bytes_escritos, BUFFER_LENGTH-bytes_escritos, "%d\n", item->data);
+
+      res_snprintf = snprintf(temp, sizeof(temp), "%d\n", item->data);
+      if(pos_off + res_snprintf <= *off){
+        pos_off += res_snprintf;
+        continue;
+      }
+
+      off_temp = 0;
+      if(pos_off < *off) {
+        off_temp = *off-pos_off;
+      }
+      bytes_utiles = res_snprintf - off_temp;
+
+      if(res_snprintf + bytes_escritos_total > len) break;
+      if(res_snprintf + bytes_escritos > BUFFER_LENGTH) {
+        if (copy_to_user(buf+pos, kbuf, bytes_escritos)) // Copiamos kbuf en buf
+            return -EFAULT;
+        pos += bytes_escritos;
+        bytes_escritos = 0;
+      }
+
+      memcpy(kbuf + bytes_escritos, temp+off_temp, bytes_utiles);
+
+      bytes_escritos += bytes_utiles;
+      bytes_escritos_total += bytes_utiles;
+      pos_off += res_snprintf;
   }
-  
-  if (copy_to_user(buf, kbuf, bytes_escritos)){
-    return -EFAULT;
+
+  if(bytes_escritos > 0) { // Copiar datos no copiados en el bucle
+    if (copy_to_user(buf+pos, kbuf, bytes_escritos)){
+        return -EFAULT;
+    }
   }
-  *off+=bytes_escritos;
-  return bytes_escritos;
+
+  *off+=bytes_escritos_total;
+  return bytes_escritos_total;
 }
 
 // Needed proc_ops:
@@ -112,31 +148,28 @@ struct proc_ops pops = {
 
 int modulo_modlist_init(void)
 {
-	printk(KERN_INFO "Modulo MODLIST cargado\n");
-  INIT_LIST_HEAD(&mylist);
-	proc_entry = proc_create("modlist", 0666, NULL, &pops);
-  // comprobamos si falla al crear proc por si acaso
-  if(proc_entry == NULL){
-    printk(KERN_ERR "[MODLIST]Error al crear /proc/modlist\n");
-    return -ENOMEM;
-  }
-	return 0;
+    printk(KERN_INFO "Modulo MODLIST cargado\n");
+    INIT_LIST_HEAD(&mylist);
+    proc_entry = proc_create("modlist", 0666, NULL, &pops);
+
+    // Comprobamos si falla al crear proc por si acaso
+    if(proc_entry == NULL){
+        printk(KERN_ERR "[MODLIST]Error al crear /proc/modlist\n");
+        return -ENOMEM;
+    }
+
+    return 0;
 }
 
 void modulo_modlist_clean(void)
 {
 
-  //libero la lista de la misma manera que cuando hago cleanup en el write para cuando cierro el modulo
-  struct list_item *cursor, *temporal; 
+    remove_proc_entry("modlist", NULL);
 
-  remove_proc_entry("modlist", NULL);
+    // Libero la lista de la misma manera que cuando hago cleanup en el write para cuando cierro el modulo
+    cleanup(&mylist);
 
-  list_for_each_entry_safe(cursor, temporal, &mylist, links){ 
-    list_del(&cursor->links);
-    kfree(cursor);
-  }
-
-	printk(KERN_INFO "Modulo MODLIST descargado.\n");
+    printk(KERN_INFO "Modulo MODLIST descargado.\n");
 }
 
 module_init(modulo_modlist_init);
