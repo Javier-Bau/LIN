@@ -104,7 +104,8 @@ static void *modlist_seq_start(struct seq_file *m, loff_t *pos)
 	struct list_head *pos_ptr;
     loff_t i = 0;
 
-    // Si nos piden una posición mayor o igual al número de elementos, devolvemos NULL (EOF)
+    /** Si nos piden una posición mayor o igual al 
+     * número de elementos, devolvemos NULL (EOF) */
     if (*pos >= list_size) {
         return NULL;
     }
