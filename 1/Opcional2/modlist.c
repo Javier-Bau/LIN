@@ -104,12 +104,13 @@ static void *modlist_seq_start(struct seq_file *m, loff_t *pos)
 	struct list_head *pos_ptr;
     loff_t i = 0;
 
-    // Si nos piden una posición mayor o igual a los elementos, devolvemos NULL (EOF)
+    // Si nos piden una posición mayor o igual al número de elementos, devolvemos NULL (EOF)
     if (*pos >= list_size) {
         return NULL;
     }
-
-    list_for_each(pos_ptr, &mylist) {
+    /** Iteramos sobre los elementos desde head para llegar 
+     * al objeto que está en el índice que nos piden */
+    list_for_each(pos_ptr, &mylist) { 
         if (i == *pos) {
             return pos_ptr;
         }
