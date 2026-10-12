@@ -74,11 +74,13 @@ static ssize_t myproc_write(struct file *filp, const char __user *buf, size_t le
       printk(KERN_INFO "[MODLIST] Removing number: %i\n", num);
       delete_if_equal(&mylist, num);
       printk(KERN_INFO "[MODLIST] Todas las instancias de %i han sido borradas\n", num);
-    }
-    else if(strncmp(kbuf, "cleanup", 7)==0){
+    } 
+    else if(strcmp(kbuf, "cleanup\n") == 0){
       printk(KERN_INFO "[MODLIST] Cleaning up...\n"); 
       cleanup(&mylist);
       printk(KERN_INFO "[MODLIST] Se ha limpiado la lista de manera exitosa\n");
+    } else {
+        return -EINVAL;
     }
 
     return len;
@@ -104,18 +106,18 @@ static ssize_t myproc_read(struct file *filp, char __user *buf, size_t len, loff
       item = list_entry(cur_node, struct list_item, links);
 
       res_snprintf = snprintf(temp, sizeof(temp), "%d\n", item->data);
-      if(pos_off + res_snprintf <= *off){
+      if(pos_off + res_snprintf <= *off){  // Saltamos los elementos que ya hemos pasado con anterioridad.
         pos_off += res_snprintf;
         continue;
       }
 
       off_temp = 0;
-      if(pos_off < *off) {
+      if(pos_off < *off) {   // Para medias palabras. 1 2 123
         off_temp = *off-pos_off;
       }
-      bytes_utiles = res_snprintf - off_temp;
+      bytes_utiles = res_snprintf - off_temp; // Vemos cuantos bytes quedan por escribir;
 
-      if(res_snprintf + bytes_escritos_total > len) break;
+      if(res_snprintf + bytes_escritos_total > len) break; //Si sobrepasamos len paramos la ejecución.
       if(res_snprintf + bytes_escritos > BUFFER_LENGTH) {
         if (copy_to_user(buf+pos, kbuf, bytes_escritos)) // Copiamos kbuf en buf
             return -EFAULT;
