@@ -5,7 +5,7 @@
 #include <linux/kd.h>       /* For KDSETLED */
 #include <linux/vt_kern.h>
 
-#define ALL_LEDS_ON 0x7
+#define ALL_LEDS_ON 0x7 
 #define ALL_LEDS_OFF 0
 
 
