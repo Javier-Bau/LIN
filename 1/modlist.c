@@ -94,11 +94,11 @@ static ssize_t myproc_read(struct file *filp, char __user *buf, size_t len, loff
   char temp[32];
 
   int bytes_escritos = 0;        // Variable que lleva el conteo de bytes que se han escrito en kbuf antes de vaciarlo a buf.
-  int bytes_escritos_total = 0;  // Variable que lleva el conteo de los bytes totales que se han volcado a buf.
-  int pos = 0;                   // Para desde donde volcar los datos en buf
-  int pos_off = 0;
+  int bytes_copiados_user = 0;
+  int res_snprintf;
 
-  int res_snprintf, bytes_utiles, off_temp;
+  if (*off > 0)
+    return 0;
 
   printk(KERN_INFO "[MODLIST] Mostrando elementos...\n");
   
@@ -106,36 +106,26 @@ static ssize_t myproc_read(struct file *filp, char __user *buf, size_t len, loff
       item = list_entry(cur_node, struct list_item, links);
 
       res_snprintf = snprintf(temp, sizeof(temp), "%d\n", item->data);
-      if(pos_off + res_snprintf <= *off){  // Saltamos los elementos que ya hemos pasado con anterioridad.
-        pos_off += res_snprintf;
-        continue;
-      }
 
-      off_temp = 0;
-      if(pos_off < *off) {   // Para medias palabras. 1 2 123
-        off_temp = *off-pos_off;
-      }
-      bytes_utiles = res_snprintf - off_temp; // Vemos cuantos bytes quedan por escribir;
+      if(res_snprintf + bytes_escritos + bytes_copiados_user > len) break; // Si sobrepasamos len paramos la ejecución.
 
-      if(res_snprintf + bytes_escritos_total > len) break; //Si sobrepasamos len paramos la ejecución.
       if(res_snprintf + bytes_escritos > BUFFER_LENGTH) {
         if (copy_to_user(buf+pos, kbuf, bytes_escritos)) // Copiamos kbuf en buf
             return -EFAULT;
-        pos += bytes_escritos;
+        bytes_copiados_user += bytes_escritos;
         bytes_escritos = 0;
       }
 
-      memcpy(kbuf + bytes_escritos, temp+off_temp, bytes_utiles);
+      memcpy(kbuf + bytes_escritos, temp, res_snprintf);
 
-      bytes_escritos += bytes_utiles;
-      bytes_escritos_total += bytes_utiles;
-      pos_off += res_snprintf;
+      bytes_escritos += res_snprintf;
   }
 
   if(bytes_escritos > 0) { // Copiar datos no copiados en el bucle
-    if (copy_to_user(buf+pos, kbuf, bytes_escritos)){
+    if (copy_to_user(buf+pos, kbuf, bytes_escritos))
         return -EFAULT;
-    }
+
+    bytes_copiados_user += bytes_escritos;
   }
 
   *off+=bytes_escritos_total;
