@@ -16,7 +16,7 @@ info "Prueba SMP (7 escritores + 4 lectores en paralelo)..."
     for i in $(seq 1 300); do
         echo "remove $((r * 1000 + i))" > "$PROC_FILE" 2>/dev/null || true
     done
-) &
+) & 
 
 # Lanzamos 1 proceso haciendo cleanups periódicos en mitad del caos
 (
@@ -26,7 +26,7 @@ info "Prueba SMP (7 escritores + 4 lectores en paralelo)..."
     done
 ) &
 
-# Lanzamos 4 lectores agresivos leyendo continuamente con cat
+# Lanzamos 1 lector leyendo continuamente con cat
 for rd in 1 2 3 4; do
     (
         for i in $(seq 1 200); do
