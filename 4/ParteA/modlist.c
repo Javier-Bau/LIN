@@ -106,15 +106,16 @@ static ssize_t myproc_read(struct file *filp, char __user *buf, size_t len, loff
   int bytes_escritos = 0;        // Variable que lleva el conteo de bytes que se han escrito en kbuf antes de vaciarlo a buf.
   int res_snprintf;
 
-  if (*off > 0)
+  if (*off > 0 || len == 0)
     return 0;
 
   
-  spin_lock(&sp);
+  /*spin_lock(&sp);
   uint64_t min_s = (len < 12*list_entries)? len : 12*list_entries; // Calculamos el mínimo entre len y el tamaño de kbuf para no sobrepasar ninguno de los dos.
-  spin_unlock(&sp);
+  spin_unlock(&sp);*/
 
-  kbuf = kmalloc(min_s, GFP_KERNEL); // con sizeof(int) peta por que en un int en char puede ocupar 12 bytes.
+  uint64_t min_s = min(len, (size_t)4*PAGE_SIZE); // consideramos que los números caben en 4 páginas(unos 3400 elementos) o que por lo menos las lecturas solo se pueden hacer de los números que quepan en una página.
+  kbuf = kvmalloc(min_s, GFP_KERNEL);
   if (kbuf == NULL) {
     return -ENOMEM;
   }
@@ -137,20 +138,33 @@ static ssize_t myproc_read(struct file *filp, char __user *buf, size_t len, loff
 
   if(bytes_escritos > 0) { // Copiar datos no copiados en el bucle
     if (copy_to_user(buf, kbuf, bytes_escritos)){
-        kfree(kbuf);
+        kvfree(kbuf);
         return -EFAULT;
     }
   }
-  kfree(kbuf);
+  kvfree(kbuf);
 
   *off+=bytes_escritos;
   return bytes_escritos;
+}
+
+static int myproc_open(struct inode *inode, struct file *file) {
+    if (!try_module_get(THIS_MODULE))
+        return -ENODEV;
+    return 0;
+}
+
+static int myproc_release(struct inode *inode, struct file *file) {
+    module_put(THIS_MODULE);
+    return 0;
 }
 
 // Needed proc_ops:
 struct proc_ops pops = {
 	.proc_read = myproc_read, //read()
 	.proc_write = myproc_write, //write()
+    .proc_open = myproc_open,
+    .proc_release = myproc_release,
 };
 
 int modulo_modlist_init(void)
