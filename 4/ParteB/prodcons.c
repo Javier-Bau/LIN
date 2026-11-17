@@ -1,21 +1,23 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/semaphore.h>
 #include <linux/kfifo.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h> //porque es dev
 
 MODULE_LICENSE("GPL");
 
 #define MAX_ITEMS_CBUF 4
 #define MAX_CHARS_KBUF 12
+#define DEVICE_NAME "prodcons" /* Device name */
 struct kfifo cbuf;
-struct semaphore elementos,huecos;
+struct semaphore elementos,huecos, mtx;
 DEFINE_SPINLOCK(sp);
 
-static struct proc_dir_entry *proc_entry;
 
 ssize_t prodcons_write(struct file *filp, const char __user *buf, size_t len, loff_t *off)
 {
@@ -38,8 +40,16 @@ ssize_t prodcons_write(struct file *filp, const char __user *buf, size_t len, lo
         if (down_interruptible(&huecos))
             return -EINTR;
         
-        kfifo_in_spinlocked(&cbuf,&val,sizeof(int), &sp);
-
+        if (down_interruptible(&mtx)) {
+            up(&huecos);
+            return -EINTR;
+        }
+        if (kfifo_in(&cbuf, &val, sizeof(int)) != sizeof(int)) {
+            up(&mtx);
+            up(&huecos);
+            return -EIO;
+        }
+        up(&mtx);
         up(&elementos);
     }else{
         return -EINVAL;
@@ -60,11 +70,16 @@ ssize_t prodcons_read(struct file *filp, char __user *buf, size_t len, loff_t *o
         return -EINTR;
 
     /* Extraer el primer entero del buffer, sin eliminarlo */
-    if(kfifo_out_spinlocked(&cbuf,&val,sizeof(int), &sp) != sizeof(int)){
+    if (down_interruptible(&mtx)) {
         up(&elementos);
-        return -EAGAIN;
+        return -EINTR;
     }
-
+    if (kfifo_out(&cbuf, &val, sizeof(int)) != sizeof(int)) {
+        up(&mtx);
+        up(&elementos);
+        return -EIO;
+    }
+    up(&mtx);
     up(&huecos);
 
     nr_bytes=sprintf(kbuf,"%i\n",val);
@@ -91,15 +106,23 @@ static int prodcons_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-struct proc_ops pops = {
-    .proc_open    = prodcons_open,
-    .proc_read    = prodcons_read,
-    .proc_write   = prodcons_write,
-    .proc_release = prodcons_release,
+static struct file_operations fops = {
+    .owner = THIS_MODULE, //con owner no tengo que estar haciendo las operaciones de module todo el rato
+    .read = prodcons_read,
+    .write = prodcons_write,
+};
+
+static struct miscdevice prodcons_misc = {
+    .minor = MISC_DYNAMIC_MINOR,
+    .name = DEVICE_NAME,
+    .mode = 0666,
+    .fops = &fops,
 };
 
 int modulo_prodcons_init(void)
 {
+    int err;
+
     printk(KERN_INFO "Modulo prodcons cargado\n");
 
     if (kfifo_alloc(&cbuf,MAX_ITEMS_CBUF*sizeof(int),GFP_KERNEL))
@@ -107,11 +130,12 @@ int modulo_prodcons_init(void)
 
     sema_init(&elementos,0);
     sema_init(&huecos,MAX_ITEMS_CBUF);
+    sema_init(&mtx, 1);
 
-    proc_entry = proc_create("prodcons", 0666, NULL, &pops);
-    // Comprobamos si falla al crear proc
-    if(proc_entry == NULL){
-        printk(KERN_ERR "[prodcons]Error al crear /proc/prodcons\n");
+    err =  misc_register(&prodcons_misc);
+    // Comprobamos si falla al crear dev
+    if(err){
+        printk(KERN_ERR "[prodcons]Error al crear /dev/prodcons\n");
         kfifo_free(&cbuf);
         return -ENOMEM;
     }
@@ -121,7 +145,7 @@ int modulo_prodcons_init(void)
 
 void modulo_prodcons_clean(void)
 {
-    remove_proc_entry("prodcons", NULL);
+    misc_deregister(&prodcons_misc);
     kfifo_free(&cbuf);
     printk(KERN_INFO "Modulo prodcons descargado.\n");
 }
