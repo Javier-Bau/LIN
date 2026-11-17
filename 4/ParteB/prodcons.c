@@ -2,7 +2,6 @@
 #include <linux/kernel.h>
 #include <linux/string.h>
 #include <linux/slab.h>
-#include <linux/spinlock.h>
 #include <linux/semaphore.h>
 #include <linux/kfifo.h>
 #include <linux/miscdevice.h>
@@ -11,15 +10,17 @@
 
 MODULE_LICENSE("GPL");
 
+// Variable que guarda el número de items en el buffer circular.
 #define MAX_ITEMS_CBUF 4
 static int max_items = MAX_ITEMS_CBUF;
 module_param(max_items, int, 0444);
 MODULE_PARM_DESC(max_items, "Numero maximo de enteros del buffer");
+
+// Resto de variables
 #define MAX_CHARS_KBUF 12
 #define DEVICE_NAME "prodcons" /* Device name */
 struct kfifo cbuf;
 struct semaphore elementos,huecos, mtx;
-DEFINE_SPINLOCK(sp);
 
 
 ssize_t prodcons_write(struct file *filp, const char __user *buf, size_t len, loff_t *off)
@@ -124,8 +125,6 @@ static struct miscdevice prodcons_misc = {
 
 int modulo_prodcons_init(void)
 {
-    int err;
-
     printk(KERN_INFO "Modulo prodcons cargado\n");
 
     if (kfifo_alloc(&cbuf,max_items*sizeof(int),GFP_KERNEL))
@@ -135,9 +134,8 @@ int modulo_prodcons_init(void)
     sema_init(&huecos,max_items);
     sema_init(&mtx, 1);
 
-    err =  misc_register(&prodcons_misc);
     // Comprobamos si falla al crear dev
-    if(err){
+    if(misc_register(&prodcons_misc)){
         printk(KERN_ERR "[prodcons]Error al crear /dev/prodcons\n");
         kfifo_free(&cbuf);
         return -ENOMEM;
