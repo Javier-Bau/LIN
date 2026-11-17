@@ -12,6 +12,9 @@
 MODULE_LICENSE("GPL");
 
 #define MAX_ITEMS_CBUF 4
+static int max_items = MAX_ITEMS_CBUF;
+module_param(max_items, int, 0444);
+MODULE_PARM_DESC(max_items, "Numero maximo de enteros del buffer");
 #define MAX_CHARS_KBUF 12
 #define DEVICE_NAME "prodcons" /* Device name */
 struct kfifo cbuf;
@@ -125,11 +128,11 @@ int modulo_prodcons_init(void)
 
     printk(KERN_INFO "Modulo prodcons cargado\n");
 
-    if (kfifo_alloc(&cbuf,MAX_ITEMS_CBUF*sizeof(int),GFP_KERNEL))
+    if (kfifo_alloc(&cbuf,max_items*sizeof(int),GFP_KERNEL))
         return -ENOMEM;
 
     sema_init(&elementos,0);
-    sema_init(&huecos,MAX_ITEMS_CBUF);
+    sema_init(&huecos,max_items);
     sema_init(&mtx, 1);
 
     err =  misc_register(&prodcons_misc);
